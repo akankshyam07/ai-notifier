@@ -1,12 +1,21 @@
 # AI Daily Popup Notifier
 
-A small macOS desktop popup that shows either a fresh AI news item or a bite-sized AI concept. It uses RSS feeds first, falls back to a concept lesson when nothing fresh is available, and presents the result in a pastel kawaii-style popup with a soft sound and smooth fade animation.
+A small macOS desktop popup that shows fresh tech/AI news or a bite-sized AI concept. It runs locally on your Mac, uses your own Gemini API key, and shows pastel kawaii-style popups with optional sound.
 
-## Prerequisites
+## Cost Model
+
+This project has no hosted backend, database, or paid server. Each user runs it locally and provides their own Gemini API key.
+
+Possible costs are only:
+
+- Gemini usage if you exceed Google's free allowance
+- an optional custom domain later, if you build a website around it
+
+## Requirements
 
 - macOS
-- Python 3.9+
-- pip
+- Python 3.10+
+- `pip`
 - Python with `tkinter` support
 
 Check tkinter:
@@ -17,165 +26,132 @@ python3 -m tkinter
 
 ## Install
 
-From this folder:
+First create a Gemini API key at:
+
+```text
+https://aistudio.google.com/app/apikey
+```
+
+Then install:
 
 ```bash
-python3 -m pip install google-genai feedparser pyyaml python-dotenv
+git clone https://github.com/akankshyam07/ai-notifier.git
+cd ai-notifier
+python3 install.py
 ```
 
-## Gemini API Key
+The installer will:
 
-1. Go to <https://aistudio.google.com/app/apikey>.
-2. Create a free Gemini API key.
-3. Copy the env template:
+- create a local `.venv`
+- install Python dependencies
+- ask for your Gemini API key without echoing it
+- write `.env`
+- create and load a `launchd` job
+- show a test popup
+
+After install, macOS runs the notifier on the interval in `config.yaml`.
+
+## Uninstall
 
 ```bash
-cp .env.example .env
+python3 uninstall.py
 ```
 
-4. Edit `.env` in the project folder and replace `your_key_here`:
+The uninstaller unloads the `launchd` job and removes the plist. It asks before deleting local state like `.env`, `seen.txt`, and `progress.txt`.
+
+## Manual Test Commands
+
+Show a popup without RSS or Gemini:
 
 ```bash
-GEMINI_API_KEY=your_real_key
+.venv/bin/python notifier.py --test-popup
 ```
 
-## Test Run
+Force a concept popup:
 
 ```bash
-python3 notifier.py
+.venv/bin/python notifier.py --concept-only
 ```
 
-If Gemini is not configured or fails, the app still shows a popup using the raw RSS title or concept name.
-
-## Scheduling With launchd
-
-`launchd` is preferred over cron for this app because it shows a GUI popup in the active macOS user session more reliably.
-
-Create `~/Library/LaunchAgents/com.ai-news.notifier.plist`:
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
-  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key>
-  <string>com.ai-news.notifier</string>
-
-  <key>ProgramArguments</key>
-  <array>
-    <string>/path/to/python3</string>
-    <string>/path/to/ai-notifier/notifier.py</string>
-  </array>
-
-  <key>StartInterval</key>
-  <integer>600</integer>
-
-  <key>RunAtLoad</key>
-  <true/>
-
-  <key>StandardOutPath</key>
-  <string>/tmp/ai-news-notifier.out.log</string>
-
-  <key>StandardErrorPath</key>
-  <string>/tmp/ai-news-notifier.err.log</string>
-</dict>
-</plist>
-```
-
-Load it:
+Force a news popup:
 
 ```bash
-launchctl load ~/Library/LaunchAgents/com.ai-news.notifier.plist
+.venv/bin/python notifier.py --news-only
 ```
 
-Unload it:
+Normal one-off run:
 
 ```bash
-launchctl unload ~/Library/LaunchAgents/com.ai-news.notifier.plist
+.venv/bin/python notifier.py
 ```
 
-## Optional Cron Fallback
+## Configuration
 
-Cron may not reliably show GUI windows. If you still want to try it:
+Edit `config.yaml`.
 
-```bash
-crontab -e
-```
-
-Add:
-
-```bash
-*/10 * * * * /path/to/python3 /path/to/ai-notifier/notifier.py
-```
-
-## Change The Interval
-
-Update both places:
-
-- `cron_minutes` in `config.yaml`
-- your scheduler interval:
-  - launchd `StartInterval` is seconds, so 10 minutes is `600`
-  - cron uses `*/10`
-
-## Customize Concepts
-
-Edit the `concepts` list in `config.yaml`.
-
-The order matters: the app walks through the list from top to bottom.
-
-## Popup Behavior
-
-The popup stays open until you click `close` or `okay`.
-
-If another scheduled run happens while a popup is already open, the current popup shows a small “new note waiting” message. After you click a button, the next note opens immediately.
-
-To disable the sound, edit `config.yaml`:
+Common settings:
 
 ```yaml
-play_sound: false
-```
-
-To use a different macOS system sound, change `sound_path`. Available sounds are in:
-
-```bash
-/System/Library/Sounds
-```
-
-To change the tone, edit:
-
-```yaml
+cron_minutes: 10
+play_sound: true
+sound_path: /System/Library/Sounds/Purr.aiff
 tone: cute
+concept_depth: technical
+popup_body_max_chars: 220
+theme: random
+transparent_window: true
 ```
 
-To change colors, choose a built-in theme:
+Theme options:
 
 ```yaml
 theme: bubblegum
 ```
 
-Theme options are `random`, `bubblegum`, `sky`, `lavender`, and `matcha`. For full control, uncomment `custom_theme` in `config.yaml` and edit the hex colors.
+Available themes are `random`, `bubblegum`, `sky`, `lavender`, and `matcha`.
 
-## Reset Concept Progress
-
-Either delete `progress.txt` or set it to:
-
-```txt
-0
-```
+To fully customize colors, uncomment `custom_theme` in `config.yaml`.
 
 ## State Files
 
-The app creates these automatically:
+These are local-only and ignored by git:
 
-- `seen.txt`: RSS links already shown, trimmed to the latest 200 links
-- `progress.txt`: the next concept index
-- `pending.txt`: queued popup count if a scheduled run happens while a popup is open
+- `.env`: your Gemini API key
+- `.venv/`: local Python environment
+- `seen.txt`: RSS links already shown, trimmed to the latest 200
+- `progress.txt`: next concept index
+- `pending.txt`: queued popup count if a scheduled run happens while one is open
 - `.notifier.lock`: prevents overlapping popup windows
+
+## Logs
+
+The launchd job writes logs to:
+
+```bash
+/tmp/ai-news-notifier.out.log
+/tmp/ai-news-notifier.err.log
+```
+
+## Advanced Manual Setup
+
+The installer handles this automatically. Manual setup is only useful for debugging.
+
+Create `~/Library/LaunchAgents/com.ai-news.notifier.plist` with `.venv/bin/python` and the full path to `notifier.py`, then load it:
+
+```bash
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.ai-news.notifier.plist
+```
+
+Unload it:
+
+```bash
+launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.ai-news.notifier.plist
+```
 
 ## Notes
 
 - The script checks `AppleClamshellState` and exits quietly if the laptop lid is closed.
-- The popup fades in, fades out after a button click, and plays the configured subtle sound.
-- If a feed fails, the app logs the error and tries the next feed.
-- If Gemini fails, the app still shows a popup.
+- The popup stays open until you click `close` or `okay`.
+- If another scheduled run happens while a popup is open, the current popup shows a small "new note waiting" message.
+- If Gemini or the network is unavailable, concept popups use local technical fallback explanations.
+- RSS HTTPS requests use `certifi` when available to avoid common macOS Python certificate errors.

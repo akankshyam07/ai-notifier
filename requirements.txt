@@ -2,3 +2,4 @@ google-genai
 feedparser
 pyyaml
 python-dotenv
+certifi

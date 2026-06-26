@@ -1,8 +1,13 @@
 cron_minutes: 10
+rss_timeout_seconds: 5
+gemini_timeout_seconds: 12
 play_sound: true
 sound_path: /System/Library/Sounds/Purr.aiff
 tone: cute
+concept_depth: technical
+popup_body_max_chars: 220
 theme: random
+transparent_window: true
 
 # Theme options: random, bubblegum, sky, lavender, matcha.
 # To fully customize colors, uncomment and edit this block:

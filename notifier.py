@@ -4,10 +4,12 @@
 from __future__ import annotations
 
 import concurrent.futures
+import argparse
 import html
 import os
 import random
 import shutil
+import ssl
 import subprocess
 import sys
 import textwrap
@@ -20,6 +22,11 @@ import feedparser
 import yaml
 from dotenv import load_dotenv
 from google import genai
+
+try:
+    import certifi
+except Exception:  # pragma: no cover - fallback for unusual installs.
+    certifi = None
 
 try:
     import tkinter as tk
@@ -41,15 +48,20 @@ LOCK_PATH = BASE_DIR / ".notifier.lock"
 PENDING_PATH = BASE_DIR / "pending.txt"
 
 MAX_SEEN = 200
-RSS_TIMEOUT_SECONDS = 3
-GEMINI_TIMEOUT_SECONDS = 4
+RSS_TIMEOUT_SECONDS = 5
+GEMINI_TIMEOUT_SECONDS = 12
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "cron_minutes": 10,
+    "rss_timeout_seconds": RSS_TIMEOUT_SECONDS,
+    "gemini_timeout_seconds": GEMINI_TIMEOUT_SECONDS,
     "play_sound": True,
     "sound_path": "/System/Library/Sounds/Purr.aiff",
     "tone": "cute",
+    "concept_depth": "technical",
+    "popup_body_max_chars": 220,
     "theme": "random",
+    "transparent_window": True,
     "llm": {
         "provider": "gemini",
         "model": "gemini-3.5-flash",
@@ -162,7 +174,7 @@ NEWS_PROMPT = """You are a friendly popup writer.
 Rewrite the following AI news headline and summary as a short, warm popup body.
 Rules:
 - Max 2 sentences
-- Max 140 characters
+- Max {max_chars} characters
 - Match this tone: {tone}
 - Lowercase, casual style, like texting a friend
 - End with one emoji from: ✨ ♡ ✦ ✿ ˚
@@ -175,10 +187,12 @@ CONCEPT_PROMPT = """You are a friendly popup writer teaching AI concepts.
 Explain the following AI concept as a short, warm popup body.
 Rules:
 - Max 2 sentences
-- Max 140 characters
+- Max {max_chars} characters
 - Match this tone: {tone}
+- Depth: {concept_depth}
+- Be technically correct: say what it does, the core mechanism, and why it matters when possible
+- Use one simple analogy, but keep the technical definition first
 - Lowercase, casual style, like texting a friend
-- Use a simple analogy to explain it
 - End with one emoji from: ✨ ♡ ✦ ✿ ˚
 - No jargon — define any technical term in parentheses immediately after
 Return only the popup body text, nothing else.
@@ -230,6 +244,30 @@ THEMES = [
         "light": "#fffdf5",
     },
 ]
+
+LOCAL_CONCEPT_EXPLANATIONS = {
+    "what is ai": "ai is software that performs tasks needing perception, language, or reasoning by learning patterns from data; like a study buddy with lots of notes ✨",
+    "what is machine learning": "machine learning trains a model (pattern-finding program) on examples so it can predict new cases; like learning cookies from many cookie photos ✨",
+    "supervised learning": "supervised learning trains on inputs plus labels (known answers), then predicts labels for new data; like homework with an answer key ✨",
+    "unsupervised learning": "unsupervised learning finds structure without labels, often by clustering similar data; like sorting stickers by hidden patterns ✿",
+    "reinforcement learning": "reinforcement learning optimizes actions using rewards and penalties from an environment; like learning a game by scoring each move ✨",
+    "training vs inference": "training adjusts model weights (learned settings) from data; inference uses those weights to answer new inputs, like practice vs game day ✦",
+    "datasets": "a dataset is the examples a model learns from or is tested on; quality and coverage matter, like ingredients deciding a recipe ✨",
+    "labels": "labels are target answers attached to examples, such as 'spam' or 'not spam'; they guide supervised learning like answer tags ♡",
+    "features": "features are measurable input signals a model uses, like word counts or pixels; they are the clues behind a prediction ✨",
+    "overfitting": "overfitting means a model memorizes training data instead of generalizing to new data; like acing practice questions only ✿",
+    "underfitting": "underfitting means a model is too simple to capture the real pattern; like using one rule for every problem ✦",
+    "bias in ai": "bias is systematic error from skewed data or design choices, causing unfair or wrong outputs; like a tilted measuring scale ♡",
+    "neural networks": "a neural network stacks layers of learned weights to transform inputs into predictions; like filters passing signals step by step ✨",
+    "tokens": "tokens are chunks of text a language model processes, often words or word pieces; they are the model's puzzle pieces ✦",
+    "embeddings": "embeddings map words or items into numeric vectors (lists of numbers) so similar meanings sit nearby; like a meaning map ✨",
+    "context windows": "a context window is the maximum tokens a model can read at once; it limits memory for the current request, like desk space ♡",
+    "prompt engineering": "prompt engineering shapes instructions and examples so a model gives better outputs; like writing a clear spec for a teammate ✨",
+    "fine-tuning": "fine-tuning continues training a model on task-specific data to shift its behavior; like tutoring after general school ✿",
+    "rag (retrieval-augmented generation)": "rag retrieves relevant documents before generation so answers can use external facts; like checking notes before replying ✨",
+    "ai agents": "ai agents combine a model with planning, memory, and tool use to complete multi-step tasks; like a tiny workflow operator ✦",
+    "hallucination": "a hallucination is a fluent but unsupported model output, often caused by guessing beyond evidence; confident wording needs checking ♡",
+}
 
 
 def log(message: str) -> None:
@@ -375,10 +413,16 @@ def append_seen_link(link: str) -> None:
     SEEN_PATH.write_text("\n".join(links[-MAX_SEEN:]) + "\n", encoding="utf-8")
 
 
-def fetch_feed(url: str) -> list[Any]:
+def ssl_context() -> ssl.SSLContext:
+    if certifi is not None:
+        return ssl.create_default_context(cafile=certifi.where())
+    return ssl.create_default_context()
+
+
+def fetch_feed(url: str, timeout: int = RSS_TIMEOUT_SECONDS) -> list[Any]:
     try:
         request = urllib.request.Request(url, headers={"User-Agent": "ai-news-popup/1.0"})
-        with urllib.request.urlopen(request, timeout=RSS_TIMEOUT_SECONDS) as response:
+        with urllib.request.urlopen(request, timeout=timeout, context=ssl_context()) as response:
             data = response.read()
         parsed = feedparser.parse(data)
     except Exception as exc:
@@ -404,8 +448,9 @@ def choose_fresh_entry(config: dict[str, Any]) -> Any | None:
     seen = read_seen_links()
     entries = []
     feed_urls = [str(url) for url in config.get("rss_feeds", [])]
+    timeout = int(config.get("rss_timeout_seconds", RSS_TIMEOUT_SECONDS))
     with concurrent.futures.ThreadPoolExecutor(max_workers=min(4, max(1, len(feed_urls)))) as executor:
-        futures = [executor.submit(fetch_feed, url) for url in feed_urls]
+        futures = [executor.submit(fetch_feed, url, timeout) for url in feed_urls]
         for future in concurrent.futures.as_completed(futures):
             try:
                 entries.extend(future.result())
@@ -458,7 +503,29 @@ def compact_text(value: str, max_chars: int) -> str:
     return cleaned[: max_chars - 1].rstrip() + "…"
 
 
-def generate_with_gemini(config: dict[str, Any], prompt: str, fallback: str) -> str:
+def config_int(config: dict[str, Any], key: str, default: int) -> int:
+    try:
+        return int(config.get(key, default))
+    except (TypeError, ValueError):
+        return default
+
+
+def local_concept_fallback(concept: str, max_chars: int) -> str:
+    normalized = concept.strip().lower()
+    if normalized in LOCAL_CONCEPT_EXPLANATIONS:
+        return compact_text(LOCAL_CONCEPT_EXPLANATIONS[normalized], max_chars)
+    short_concept = compact_text(concept, 54)
+    return compact_text(
+        f"{short_concept} is an ai technique that helps models represent data, retrieve facts, or make decisions; like a labeled tool in a kit ✨",
+        max_chars,
+    )
+
+
+def local_news_fallback(title: str, max_chars: int) -> str:
+    return compact_text(f"tech update: {title} ✨", max_chars)
+
+
+def generate_with_gemini(config: dict[str, Any], prompt: str, fallback: str, max_chars: int) -> str:
     load_dotenv(ENV_PATH)
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
@@ -473,8 +540,9 @@ def generate_with_gemini(config: dict[str, Any], prompt: str, fallback: str) -> 
 
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     future = executor.submit(call_model)
+    timeout = config_int(config, "gemini_timeout_seconds", GEMINI_TIMEOUT_SECONDS)
     try:
-        text = future.result(timeout=GEMINI_TIMEOUT_SECONDS)
+        text = future.result(timeout=timeout)
     except concurrent.futures.TimeoutError as exc:
         future.cancel()
         raise RuntimeError("Gemini call timed out") from exc
@@ -483,7 +551,7 @@ def generate_with_gemini(config: dict[str, Any], prompt: str, fallback: str) -> 
 
     if not text:
         raise RuntimeError("Gemini returned an empty response")
-    return compact_text(text, 140) or compact_text(fallback, 140)
+    return compact_text(text, max_chars) or compact_text(fallback, max_chars)
 
 
 def rounded_rect(canvas: tk.Canvas, x1: int, y1: int, x2: int, y2: int, radius: int, **kwargs: Any) -> int:
@@ -564,6 +632,23 @@ def select_theme(config: dict[str, Any]) -> dict[str, str]:
     return random.choice(THEMES)
 
 
+def apply_transparent_background(root: tk.Tk, canvas: tk.Canvas, config: dict[str, Any], fallback_bg: str) -> None:
+    if not bool(config.get("transparent_window", DEFAULT_CONFIG["transparent_window"])):
+        root.configure(bg=fallback_bg)
+        canvas.configure(bg=fallback_bg)
+        return
+
+    for setter in (
+        lambda: root.configure(bg="systemTransparent"),
+        lambda: canvas.configure(bg="systemTransparent"),
+        lambda: root.attributes("-transparent", True),
+    ):
+        try:
+            setter()
+        except Exception as exc:
+            log(f"warning: transparent popup background option failed: {exc}")
+
+
 def show_popup(
     title: str,
     body: str,
@@ -586,10 +671,9 @@ def show_popup(
     root.overrideredirect(True)
     root.attributes("-topmost", True)
     root.attributes("-alpha", 0.0)
-    root.configure(bg=theme["accent"])
 
-    width = 520
-    height = 245
+    width = 560
+    height = 285
     screen_width = root.winfo_screenwidth()
     screen_height = root.winfo_screenheight()
     x = max(20, screen_width - width - 42)
@@ -598,6 +682,7 @@ def show_popup(
 
     canvas = tk.Canvas(root, width=width, height=height, bg=theme["accent"], highlightthickness=0)
     canvas.pack(fill="both", expand=True)
+    apply_transparent_background(root, canvas, popup_config, theme["accent"])
 
     margin = 13
     card_x1, card_y1 = margin, margin
@@ -612,7 +697,7 @@ def show_popup(
     canvas.create_line(card_x1 + 2, card_y1 + bar_h, card_x2 - 2, card_y1 + bar_h, fill=theme["border"], width=3)
 
     title_font = pick_font(root, 19, "bold")
-    body_font = pick_font(root, 17, "bold")
+    body_font = pick_font(root, 15, "bold")
     button_font = pick_font(root, 14, "bold")
     pending_font = pick_font(root, 12, "bold")
 
@@ -626,15 +711,16 @@ def show_popup(
     canvas.create_line(card_x2 - 135, card_y1 + 88, card_x2 - 52, card_y1 + 88, fill=theme["accent"], width=10, capstyle="round")
     canvas.create_oval(card_x2 - 35, card_y1 + 82, card_x2 - 22, card_y1 + 95, fill=theme["accent"], outline="")
 
-    wrapped = "\n".join(textwrap.wrap(compact_text(body, 140), width=42))
+    max_chars = config_int(popup_config, "popup_body_max_chars", DEFAULT_CONFIG["popup_body_max_chars"])
+    wrapped = "\n".join(textwrap.wrap(compact_text(body, max_chars), width=48))
     canvas.create_text(
         width // 2,
-        card_y1 + 122,
+        card_y1 + 136,
         text=wrapped,
         fill=theme["text"],
         font=body_font,
         justify="center",
-        width=390,
+        width=450,
     )
 
     pending_text = canvas.create_text(
@@ -701,30 +787,75 @@ def show_popup(
 
 def build_news_popup(config: dict[str, Any], entry: Any) -> tuple[str, str, str | None]:
     title = "✦ ai corner"
-    raw_title = compact_text(str(getattr(entry, "title", "fresh ai news")), 140)
+    max_chars = config_int(config, "popup_body_max_chars", DEFAULT_CONFIG["popup_body_max_chars"])
+    raw_title = compact_text(str(getattr(entry, "title", "fresh ai news")), max_chars)
     summary = compact_text(str(getattr(entry, "summary", "")), 500)
-    prompt = f"{NEWS_PROMPT.format(tone=config.get('tone', DEFAULT_CONFIG['tone']))}\nheadline: {raw_title}\nsummary: {summary}"
+    prompt = (
+        f"{NEWS_PROMPT.format(tone=config.get('tone', DEFAULT_CONFIG['tone']), max_chars=max_chars)}"
+        f"\nheadline: {raw_title}\nsummary: {summary}"
+    )
     try:
-        body = generate_with_gemini(config, prompt, raw_title)
+        body = generate_with_gemini(config, prompt, raw_title, max_chars)
     except Exception as exc:
         log(f"warning: Gemini rewrite failed for news; using raw title: {exc}")
-        body = compact_text(raw_title, 140)
+        body = local_news_fallback(raw_title, max_chars)
     return title, body, str(getattr(entry, "link", "")).strip() or None
 
 
 def build_concept_popup(config: dict[str, Any]) -> tuple[str, str, int]:
     concept, index = next_concept(config)
     title = "✿ learn something!"
-    prompt = f"{CONCEPT_PROMPT.format(tone=config.get('tone', DEFAULT_CONFIG['tone']))}\nconcept: {concept}"
+    max_chars = config_int(config, "popup_body_max_chars", DEFAULT_CONFIG["popup_body_max_chars"])
+    prompt = (
+        f"{CONCEPT_PROMPT.format(tone=config.get('tone', DEFAULT_CONFIG['tone']), concept_depth=config.get('concept_depth', DEFAULT_CONFIG['concept_depth']), max_chars=max_chars)}"
+        f"\nconcept: {concept}"
+    )
     try:
-        body = generate_with_gemini(config, prompt, concept)
+        body = generate_with_gemini(config, prompt, concept, max_chars)
     except Exception as exc:
-        log(f"warning: Gemini rewrite failed for concept; using concept name: {exc}")
-        body = compact_text(concept, 140)
+        log(f"warning: Gemini rewrite failed for concept; using local explanation: {exc}")
+        body = local_concept_fallback(concept, max_chars)
     return title, body, index
 
 
-def main() -> int:
+def sound_path_for_config(config: dict[str, Any]) -> str | None:
+    if not bool(config.get("play_sound", DEFAULT_CONFIG["play_sound"])):
+        return None
+    return str(config.get("sound_path", DEFAULT_CONFIG["sound_path"]))
+
+
+def build_popup_for_mode(config: dict[str, Any], mode: str) -> tuple[str, str, str | None, int | None]:
+    seen_link = None
+    concept_index = None
+
+    if mode == "concept":
+        title, body, concept_index = build_concept_popup(config)
+        return title, body, seen_link, concept_index
+
+    entry = choose_fresh_entry(config)
+    if entry is not None:
+        title, body, seen_link = build_news_popup(config, entry)
+        return title, body, seen_link, concept_index
+
+    if mode == "news":
+        max_chars = config_int(config, "popup_body_max_chars", DEFAULT_CONFIG["popup_body_max_chars"])
+        return "✦ ai corner", compact_text("no fresh tech or ai news right now; try again soon ✨", max_chars), None, None
+
+    title, body, concept_index = build_concept_popup(config)
+    return title, body, seen_link, concept_index
+
+
+def show_built_popup(config: dict[str, Any], title: str, body: str) -> int:
+    try:
+        max_chars = config_int(config, "popup_body_max_chars", DEFAULT_CONFIG["popup_body_max_chars"])
+        show_popup(compact_text(title, 80), compact_text(body, max_chars), config, sound_path_for_config(config))
+    except Exception as exc:
+        log(f"error: popup display failed: {exc}")
+        return 1
+    return 0
+
+
+def run_notifier(mode: str = "normal") -> int:
     if not check_lid_open():
         return 0
 
@@ -735,24 +866,10 @@ def main() -> int:
     try:
         while True:
             config = load_config()
-            sound_path = str(config.get("sound_path", DEFAULT_CONFIG["sound_path"]))
-            if not bool(config.get("play_sound", DEFAULT_CONFIG["play_sound"])):
-                sound_path = None
-
-            entry = choose_fresh_entry(config)
-            seen_link = None
-            concept_index = None
-
-            if entry is not None:
-                title, body, seen_link = build_news_popup(config, entry)
-            else:
-                title, body, concept_index = build_concept_popup(config)
-
-            try:
-                show_popup(compact_text(title, 80), compact_text(body, 140), config, sound_path)
-            except Exception as exc:
-                log(f"error: popup display failed: {exc}")
-                return 1
+            title, body, seen_link, concept_index = build_popup_for_mode(config, mode)
+            result = show_built_popup(config, title, body)
+            if result:
+                return result
 
             if seen_link:
                 append_seen_link(seen_link)
@@ -761,9 +878,36 @@ def main() -> int:
 
             if not consume_pending_count():
                 return 0
+            mode = "normal"
 
     finally:
         release_lock()
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Show AI news and learning popups.")
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--test-popup", action="store_true", help="show a test popup without RSS or Gemini")
+    group.add_argument("--concept-only", action="store_true", help="force concept mode for this run")
+    group.add_argument("--news-only", action="store_true", help="force news mode for this run")
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    config = load_config()
+
+    if args.test_popup:
+        return show_built_popup(
+            config,
+            "✦ ai corner",
+            "installer test: your soft little ai popup is working ✨",
+        )
+    if args.concept_only:
+        return run_notifier("concept")
+    if args.news_only:
+        return run_notifier("news")
+    return run_notifier("normal")
 
 
 if __name__ == "__main__":
