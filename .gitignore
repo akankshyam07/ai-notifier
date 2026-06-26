@@ -1,0 +1,8 @@
+.env
+seen.txt
+progress.txt
+pending.txt
+.notifier.lock
+__pycache__/
+*.pyc
+.DS_Store

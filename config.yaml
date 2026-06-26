@@ -1,0 +1,128 @@
+cron_minutes: 10
+play_sound: true
+sound_path: /System/Library/Sounds/Purr.aiff
+tone: cute
+theme: random
+
+# Theme options: random, bubblegum, sky, lavender, matcha.
+# To fully customize colors, uncomment and edit this block:
+# custom_theme:
+#   bg: "#fff7fb"
+#   bar: "#f78fbe"
+#   border: "#c4588b"
+#   text: "#b74783"
+#   button: "#f5a3cf"
+#   button2: "#ffd0e7"
+#   accent: "#ffe8f4"
+#   light: "#fff5fb"
+
+llm:
+  provider: gemini
+  model: gemini-3.5-flash
+
+rss_feeds:
+  - https://www.technologyreview.com/feed/
+  - https://www.theverge.com/ai-artificial-intelligence/rss/index.xml
+  - https://venturebeat.com/ai/feed/
+  - https://feeds.arstechnica.com/arstechnica/technology-lab
+
+concepts:
+  # beginner - foundations
+  - what is AI
+  - what is machine learning
+  - supervised learning
+  - unsupervised learning
+  - reinforcement learning
+  - training vs inference
+  - datasets
+  - labels
+  - features
+  - overfitting
+  - underfitting
+  - bias in AI
+  - neural networks
+  - neurons
+  - activation functions
+  - weights
+  - layers
+  - deep learning
+  - gradient descent
+  - loss function
+  # intermediate - how models work
+  - backpropagation
+  - learning rate
+  - batch size
+  - epochs
+  - CNNs (convolutional neural networks)
+  - RNNs (recurrent neural networks)
+  - LSTMs
+  - transformers
+  - attention mechanism
+  - self-attention
+  - positional encoding
+  - tokenization
+  - tokens
+  - embeddings
+  - vector space
+  - cosine similarity
+  - context windows
+  - temperature
+  - top-p sampling
+  - softmax
+  # applied - modern AI
+  - prompt engineering
+  - few-shot learning
+  - zero-shot learning
+  - chain of thought prompting
+  - in-context learning
+  - fine-tuning
+  - RLHF (reinforcement learning from human feedback)
+  - instruction tuning
+  - LoRA (low-rank adaptation)
+  - quantization
+  - RAG (retrieval-augmented generation)
+  - vector databases
+  - semantic search
+  - knowledge graphs
+  - multimodal models
+  - vision-language models
+  - diffusion models
+  - GANs (generative adversarial networks)
+  - VAEs (variational autoencoders)
+  - text-to-image
+  - text-to-speech
+  - speech-to-text
+  # agents and systems
+  - AI agents
+  - tool use
+  - function calling
+  - planning in agents
+  - memory in agents
+  - multi-agent systems
+  - MCP (model context protocol)
+  - model routing
+  - KV cache
+  - latency vs cost tradeoffs
+  - LLM APIs
+  - system prompts
+  - context management
+  # safety and frontier
+  - hallucination
+  - grounding
+  - alignment
+  - AI safety
+  - RLAIF (reinforcement learning from AI feedback)
+  - constitutional AI
+  - red teaming
+  - jailbreaking
+  - prompt injection
+  - adversarial attacks
+  - mechanistic interpretability
+  - superposition in neural nets
+  - circuits in neural nets
+  - sparse autoencoders
+  - emergent abilities
+  - scaling laws
+  - compute-optimal training
+  - mixture of experts
+  - speculative decoding
