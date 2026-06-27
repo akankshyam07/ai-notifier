@@ -180,6 +180,7 @@ Rules:
 - Lowercase, casual style, like texting a friend
 - Highlight the important info using this shape when possible: "key: ... why it matters: ..."
 - Include specific company names, numbers, places, or impacts when they are present
+- If space is tight, summarize harder; do not trail off or end mid-thought
 - End with one emoji from: ✨ ♡ ✦ ✿ ˚
 - No jargon — if a technical term is needed, define it in parentheses immediately after
 - Never start with "i" — start with the subject
@@ -622,10 +623,62 @@ def next_concept(config: dict[str, Any]) -> tuple[str, int]:
 
 
 def compact_text(value: str, max_chars: int) -> str:
-    cleaned = " ".join(html.unescape(value).split())
+    cleaned = " ".join(re.sub(r"<[^>]+>", " ", html.unescape(value)).split())
     if len(cleaned) <= max_chars:
         return cleaned
     return cleaned[: max_chars - 1].rstrip() + "…"
+
+
+def clip_at_word(value: str, max_chars: int) -> str:
+    cleaned = " ".join(re.sub(r"<[^>]+>", " ", html.unescape(value)).split())
+    if len(cleaned) <= max_chars:
+        return trim_dangling_words(cleaned)
+    if max_chars <= 0:
+        return ""
+    clipped = cleaned[:max_chars].rsplit(" ", 1)[0].strip(" ,;:-")
+    return trim_dangling_words(clipped or cleaned[:max_chars].strip(" ,;:-"))
+
+
+def trim_dangling_words(value: str) -> str:
+    dangling = {
+        "a",
+        "an",
+        "and",
+        "as",
+        "at",
+        "but",
+        "by",
+        "for",
+        "from",
+        "in",
+        "of",
+        "on",
+        "or",
+        "the",
+        "to",
+        "while",
+        "with",
+    }
+    words = value.split()
+    while words and words[-1].lower().strip(".,;:!?") in dangling:
+        words.pop()
+    return " ".join(words).strip(" ,;:-")
+
+
+def first_summary_sentence(summary: str, title: str) -> str:
+    cleaned = " ".join(re.sub(r"<[^>]+>", " ", html.unescape(summary)).split())
+    if not cleaned:
+        return ""
+    title_words = set(re.findall(r"[a-z0-9]+", title.lower()))
+    for sentence in re.split(r"(?<=[.!?])\s+", cleaned):
+        sentence = sentence.strip()
+        if len(sentence) < 24:
+            continue
+        sentence_words = set(re.findall(r"[a-z0-9]+", sentence.lower()))
+        if title_words and len(title_words & sentence_words) / max(1, len(title_words)) > 0.8:
+            continue
+        return sentence
+    return cleaned
 
 
 def config_int(config: dict[str, Any], key: str, default: int) -> int:
@@ -647,9 +700,31 @@ def local_concept_fallback(concept: str, max_chars: int) -> str:
 
 
 def local_news_fallback(title: str, max_chars: int, summary: str = "") -> str:
-    if summary:
-        return compact_text(f"key: {title}. why it matters: {summary} ✨", max_chars)
-    return compact_text(f"key: {title} ✨", max_chars)
+    clean_title = clip_at_word(title, 140)
+    clean_summary = first_summary_sentence(summary, clean_title)
+    if not clean_summary:
+        return f"key: {clip_at_word(clean_title, max_chars - 7)} ✨"
+
+    prefix = "key: "
+    middle = ". why it matters: "
+    suffix = " ✨"
+    reserved = len(prefix) + len(middle) + len(suffix)
+    available = max(40, max_chars - reserved)
+    title_budget = min(len(clean_title), max(45, available // 2))
+    why_budget = available - title_budget
+    if why_budget < 45:
+        title_budget = max(30, title_budget - (45 - why_budget))
+        why_budget = available - title_budget
+
+    short_title = clip_at_word(clean_title, title_budget)
+    short_why = clip_at_word(clean_summary, why_budget)
+    body = f"{prefix}{short_title}{middle}{short_why}{suffix}"
+    if len(body) <= max_chars:
+        return body
+
+    why_budget = max(20, why_budget - (len(body) - max_chars))
+    short_why = clip_at_word(clean_summary, why_budget)
+    return f"{prefix}{short_title}{middle}{short_why}{suffix}"
 
 
 def generate_with_gemini(config: dict[str, Any], prompt: str, fallback: str, max_chars: int) -> str:
@@ -678,7 +753,7 @@ def generate_with_gemini(config: dict[str, Any], prompt: str, fallback: str, max
 
     if not text:
         raise RuntimeError("Gemini returned an empty response")
-    return compact_text(text, max_chars) or compact_text(fallback, max_chars)
+    return clip_at_word(text, max_chars) or clip_at_word(fallback, max_chars)
 
 
 def rounded_rect(canvas: tk.Canvas, x1: int, y1: int, x2: int, y2: int, radius: int, **kwargs: Any) -> int:
