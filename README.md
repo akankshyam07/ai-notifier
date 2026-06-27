@@ -199,5 +199,5 @@ crontab -e
 - The script checks `AppleClamshellState` and exits quietly if the laptop lid is closed.
 - The popup stays open until you click `close` or `okay`.
 - If another scheduled run happens while a popup is open, the current popup shows a small "new note waiting" message.
-- If Gemini or the network is unavailable, news popups fall back to a `key:` / `why it matters:` note and concept popups use local technical fallback explanations.
+- If Gemini or the network is unavailable, news popups fall back to a short plain-language summary and concept popups use local technical fallback explanations.
 - RSS HTTPS requests use the system certificate store. If your local Python install has certificate issues, reinstall Python from python.org or run its bundled certificate installer.

@@ -117,10 +117,10 @@ Optional live checks:
 
 `--concept-only` and `--news-only` may call Gemini and RSS feeds. If Gemini fails, the notifier should still show a fallback body instead of silently dropping the popup.
 
-Expected news fallback shape when Gemini is unavailable:
+Expected news fallback behavior when Gemini is unavailable:
 
 ```text
-key: <what happened>. why it matters: <impact or context> ✨
+<what happened>. <short impact or context> ✨
 ```
 
 ## Launchd Commands

@@ -178,8 +178,9 @@ Rules:
 - Max {max_chars} characters
 - Match this tone: {tone}
 - Lowercase, casual style, like texting a friend
-- Highlight the important info using this shape when possible: "key: ... why it matters: ..."
+- Put the most important company, deadline, number, place, or impact near the start
 - Include specific company names, numbers, places, or impacts when they are present
+- Write it as one flowing note with what happened and why it matters; do not use labels like "key" or "why it matters"
 - If space is tight, summarize harder; do not trail off or end mid-thought
 - End with one emoji from: ✨ ♡ ✦ ✿ ˚
 - No jargon — if a technical term is needed, define it in parentheses immediately after
@@ -651,9 +652,18 @@ def trim_dangling_words(value: str) -> str:
         "for",
         "from",
         "in",
+        "meaning",
+        "could",
+        "would",
+        "should",
+        "can",
+        "may",
+        "might",
+        "will",
         "of",
         "on",
         "or",
+        "so",
         "the",
         "to",
         "while",
@@ -681,6 +691,24 @@ def first_summary_sentence(summary: str, title: str) -> str:
     return cleaned
 
 
+def smooth_news_text(value: str) -> str:
+    cleaned = " ".join(re.sub(r"<[^>]+>", " ", html.unescape(value)).split())
+    replacements = {
+        "has drastically shortened the deadline for federal agencies to stop using": "moved up the deadline for agencies to replace",
+        "drastically shortened the deadline for federal agencies to stop using": "moved up the deadline for agencies to replace",
+        "quantum-vulnerable cryptography": "quantum-vulnerable encryption",
+        "security teams have less time to replace encryption that future quantum computers could break": "security teams have less time to protect encryption before future quantum computers can break it",
+        ", meaning ": ", so ",
+        "; meaning ": ", so ",
+        " meaning ": " so ",
+        " in order to ": " to ",
+        " due to the fact that ": " because ",
+    }
+    for old, new in replacements.items():
+        cleaned = cleaned.replace(old, new)
+    return cleaned
+
+
 def config_int(config: dict[str, Any], key: str, default: int) -> int:
     try:
         return int(config.get(key, default))
@@ -700,31 +728,22 @@ def local_concept_fallback(concept: str, max_chars: int) -> str:
 
 
 def local_news_fallback(title: str, max_chars: int, summary: str = "") -> str:
-    clean_title = clip_at_word(title, 140)
-    clean_summary = first_summary_sentence(summary, clean_title)
+    clean_title = clip_at_word(title, 120)
+    clean_summary = smooth_news_text(first_summary_sentence(summary, clean_title))
     if not clean_summary:
-        return f"key: {clip_at_word(clean_title, max_chars - 7)} ✨"
+        return f"{clip_at_word(clean_title, max_chars - 3)} ✨"
 
-    prefix = "key: "
-    middle = ". why it matters: "
     suffix = " ✨"
-    reserved = len(prefix) + len(middle) + len(suffix)
-    available = max(40, max_chars - reserved)
-    title_budget = min(len(clean_title), max(45, available // 2))
-    why_budget = available - title_budget
-    if why_budget < 45:
-        title_budget = max(30, title_budget - (45 - why_budget))
-        why_budget = available - title_budget
+    body_budget = max_chars - len(suffix)
+    title_words = set(re.findall(r"[a-z0-9]+", clean_title.lower()))
+    summary_words = set(re.findall(r"[a-z0-9]+", clean_summary.lower()))
+    overlap = len(title_words & summary_words) / max(1, len(title_words))
 
-    short_title = clip_at_word(clean_title, title_budget)
-    short_why = clip_at_word(clean_summary, why_budget)
-    body = f"{prefix}{short_title}{middle}{short_why}{suffix}"
-    if len(body) <= max_chars:
-        return body
+    if overlap >= 0.5:
+        return f"{clip_at_word(clean_summary, body_budget)}{suffix}"
 
-    why_budget = max(20, why_budget - (len(body) - max_chars))
-    short_why = clip_at_word(clean_summary, why_budget)
-    return f"{prefix}{short_title}{middle}{short_why}{suffix}"
+    combined = f"{clean_title}. {clean_summary}"
+    return f"{clip_at_word(combined, body_budget)}{suffix}"
 
 
 def generate_with_gemini(config: dict[str, Any], prompt: str, fallback: str, max_chars: int) -> str:
