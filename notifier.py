@@ -8,6 +8,7 @@ import argparse
 import html
 import os
 import random
+import re
 import shutil
 import ssl
 import subprocess
@@ -171,12 +172,14 @@ DEFAULT_CONFIG: dict[str, Any] = {
 }
 
 NEWS_PROMPT = """You are a friendly popup writer.
-Rewrite the following AI news headline and summary as a short, warm popup body.
+Rewrite the following AI, science, or technology news headline and summary as a short, warm popup body.
 Rules:
 - Max 2 sentences
 - Max {max_chars} characters
 - Match this tone: {tone}
 - Lowercase, casual style, like texting a friend
+- Highlight the important info using this shape when possible: "key: ... why it matters: ..."
+- Include specific company names, numbers, places, or impacts when they are present
 - End with one emoji from: ✨ ♡ ✦ ✿ ˚
 - No jargon — if a technical term is needed, define it in parentheses immediately after
 - Never start with "i" — start with the subject
@@ -444,14 +447,112 @@ def entry_timestamp(entry: Any) -> float:
     return 0
 
 
-_AI_TECH_KEYWORDS = {
-    "ai", "artificial intelligence", "machine learning", "deep learning", "neural",
-    "llm", "gpt", "chatgpt", "openai", "anthropic", "google deepmind", "gemini",
-    "claude", "mistral", "meta ai", "nvidia", "chip", "semiconductor", "gpu",
-    "robot", "robotics", "autonomous", "model", "algorithm", "compute", "inference",
-    "training", "dataset", "benchmark", "open source", "startup", "funding", "vc",
-    "software", "cloud", "api", "quantum", "cybersecurity", "hack", "breach",
-    "privacy", "regulation", "tech", "technology", "silicon", "processor",
+_TECH_NEWS_KEYWORDS = {
+    "ai",
+    "artificial intelligence",
+    "machine learning",
+    "deep learning",
+    "neural",
+    "llm",
+    "large language model",
+    "language model",
+    "foundation model",
+    "generative ai",
+    "gpt",
+    "chatgpt",
+    "openai",
+    "anthropic",
+    "deepmind",
+    "google deepmind",
+    "gemini",
+    "claude",
+    "mistral",
+    "meta ai",
+    "copilot",
+    "robot",
+    "robotics",
+    "autonomous vehicle",
+    "autonomous driving",
+    "ai agent",
+    "agentic",
+    "prompt",
+    "inference",
+    "model training",
+    "training data",
+    "synthetic data",
+    "rag",
+    "retrieval-augmented",
+    "benchmark",
+    "gpu cluster",
+    "ai chip",
+    "ai accelerator",
+    "nvidia ai",
+    "nvidia",
+    "chip",
+    "semiconductor",
+    "gpu",
+    "cpu",
+    "quantum",
+    "cybersecurity",
+    "security",
+    "privacy",
+    "hack",
+    "breach",
+    "vulnerability",
+    "encryption",
+    "crypto",
+    "cloud",
+    "server",
+    "software",
+    "api",
+    "open source",
+    "startup",
+    "funding",
+    "vc",
+    "regulation",
+    "antitrust",
+    "processor",
+    "compute",
+    "data center",
+    "datacenter",
+    "data centers",
+    "datacenters",
+    "power plant",
+    "power plants",
+    "power grid",
+    "grid",
+    "electricity",
+    "energy",
+    "heat",
+    "extreme heat",
+    "water use",
+    "water usage",
+    "cooling",
+    "supply chain",
+    "infrastructure",
+    "acquired",
+    "acquires",
+    "acquisition",
+    "merger",
+    "takeover",
+    "ipo",
+    "layoffs",
+    "bankruptcy",
+    "partnership",
+    "backs",
+    "backing",
+    "robot",
+    "robotics",
+    "space",
+    "satellite",
+    "battery",
+    "energy storage",
+    "nuclear",
+    "climate tech",
+    "electric vehicle",
+    "ev",
+    "biotech",
+    "gene editing",
 }
 
 _NOISE_KEYWORDS = {
@@ -465,7 +566,7 @@ def _entry_is_relevant(entry: Any) -> bool:
     text = (str(getattr(entry, "title", "")) + " " + str(getattr(entry, "summary", ""))).lower()
     if any(kw in text for kw in _NOISE_KEYWORDS):
         return False
-    return any(kw in text for kw in _AI_TECH_KEYWORDS)
+    return any(re.search(rf"(?<![a-z0-9]){re.escape(kw)}(?![a-z0-9])", text) for kw in _TECH_NEWS_KEYWORDS)
 
 
 def choose_fresh_entry(config: dict[str, Any]) -> Any | None:
@@ -546,7 +647,9 @@ def local_concept_fallback(concept: str, max_chars: int) -> str:
 
 
 def local_news_fallback(title: str, max_chars: int, summary: str = "") -> str:
-    return compact_text(f"{title} ✨", max_chars)
+    if summary:
+        return compact_text(f"key: {title}. why it matters: {summary} ✨", max_chars)
+    return compact_text(f"key: {title} ✨", max_chars)
 
 
 def generate_with_gemini(config: dict[str, Any], prompt: str, fallback: str, max_chars: int) -> str:
@@ -822,9 +925,9 @@ def show_popup(
 
 
 def build_news_popup(config: dict[str, Any], entry: Any) -> tuple[str, str, str | None]:
-    title = "✦ ai corner"
+    title = "✦ tech corner"
     max_chars = config_int(config, "popup_body_max_chars", DEFAULT_CONFIG["popup_body_max_chars"])
-    raw_title = compact_text(str(getattr(entry, "title", "fresh ai news")), max_chars)
+    raw_title = compact_text(str(getattr(entry, "title", "fresh tech news")), max_chars)
     summary = compact_text(str(getattr(entry, "summary", "")), 500)
     prompt = (
         f"{NEWS_PROMPT.format(tone=config.get('tone', DEFAULT_CONFIG['tone']), max_chars=max_chars)}"

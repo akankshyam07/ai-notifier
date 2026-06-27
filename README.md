@@ -1,6 +1,8 @@
-# AI Daily Popup Notifier
+# Tech Daily Popup Notifier
 
-A small macOS desktop popup that shows fresh tech/AI news or a bite-sized AI concept. It runs locally on your Mac, uses your own Gemini API key, and shows pastel kawaii-style popups with optional sound.
+A small macOS desktop popup that helps you keep up with important technology news and bite-sized AI concepts. It runs locally on your Mac, uses your own Gemini API key, and shows compact pastel popups with optional sound.
+
+The news feed is intentionally broader than AI. It can surface AI, chips, cybersecurity, data centers, power grids, acquisitions, funding, infrastructure, space, biotech, climate-tech, and other technology-adjacent updates worth knowing.
 
 ## Cost Model
 
@@ -50,6 +52,16 @@ The installer will:
 - show a test popup
 
 After install, macOS runs the notifier on the interval in `config.yaml`.
+
+For Codex, Claude, or another local coding agent doing the setup, use [`AGENT_SETUP.md`](AGENT_SETUP.md).
+
+## What You Get
+
+- Important tech news summarized into a short note.
+- AI concept explanations when there is no fresh news.
+- A custom tkinter popup instead of macOS Notification Center.
+- A lock file and pending counter so scheduled runs do not stack windows.
+- Local state only: no database, server, or background web service.
 
 ## Uninstall
 
@@ -112,6 +124,22 @@ Available themes are `random`, `bubblegum`, `sky`, `lavender`, and `matcha`.
 
 To fully customize colors, uncomment `custom_theme` in `config.yaml`.
 
+## Privacy and Git Safety
+
+Do not commit `.env`. It contains the user's Gemini API key and is ignored by git.
+
+Ignored local files include:
+
+- `.env`
+- `.venv/`
+- `seen.txt`
+- `progress.txt`
+- `pending.txt`
+- `.notifier.lock`
+- logs and local scheduler output
+
+The committed `.env.example` file is safe because it only contains a placeholder.
+
 ## State Files
 
 These are local-only and ignored by git:
@@ -132,6 +160,14 @@ The launchd job writes logs to:
 /tmp/ai-news-notifier.err.log
 ```
 
+## Changing the Interval
+
+Update `cron_minutes` in `config.yaml`, then rerun the installer so the `launchd` `StartInterval` is regenerated:
+
+```bash
+python3 install.py --no-test-popup
+```
+
 ## Advanced Manual Setup
 
 The installer handles this automatically. Manual setup is only useful for debugging.
@@ -148,10 +184,20 @@ Unload it:
 launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.ai-news.notifier.plist
 ```
 
+Cron can run the script, but `launchd` is preferred for GUI popups because it runs inside the active macOS user session. If cron does not show the popup, use `launchd`.
+
+Cron fallback:
+
+```bash
+crontab -e
+# update both paths before using:
+*/10 * * * * /path/to/python3 /path/to/ai-notifier/notifier.py
+```
+
 ## Notes
 
 - The script checks `AppleClamshellState` and exits quietly if the laptop lid is closed.
 - The popup stays open until you click `close` or `okay`.
 - If another scheduled run happens while a popup is open, the current popup shows a small "new note waiting" message.
-- If Gemini or the network is unavailable, concept popups use local technical fallback explanations.
-- RSS HTTPS requests use `certifi` when available to avoid common macOS Python certificate errors.
+- If Gemini or the network is unavailable, news popups fall back to a `key:` / `why it matters:` note and concept popups use local technical fallback explanations.
+- RSS HTTPS requests use the system certificate store. If your local Python install has certificate issues, reinstall Python from python.org or run its bundled certificate installer.

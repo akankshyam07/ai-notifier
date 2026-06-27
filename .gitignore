@@ -1,10 +1,33 @@
+# Secrets
 .env
-AGENTS.md
+.env.*
+!.env.example
+
+# Local Python environment
 .venv/
+venv/
+env/
+
+# Runtime state
 seen.txt
 progress.txt
 pending.txt
 .notifier.lock
+
+# Logs and local scheduler output
+*.log
+*.out
+*.err
+com.ai-news.notifier.plist
+
+# Python/cache files
 __pycache__/
-*.pyc
+*.py[cod]
+
+# macOS/editor files
 .DS_Store
+.idea/
+.vscode/
+
+# Local agent-only instructions
+AGENTS.md
