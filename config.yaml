@@ -23,12 +23,12 @@ transparent_window: true
 
 llm:
   provider: gemini
-  model: gemini-3.5-flash
+  model: gemini-2.0-flash-lite
 
 rss_feeds:
   - https://www.technologyreview.com/feed/
-  - https://www.theverge.com/ai-artificial-intelligence/rss/index.xml
-  - https://venturebeat.com/ai/feed/
+  - https://www.theverge.com/rss/index.xml
+  - https://venturebeat.com/category/ai/feed
   - https://feeds.arstechnica.com/arstechnica/technology-lab
 
 concepts:

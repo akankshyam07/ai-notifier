@@ -444,6 +444,30 @@ def entry_timestamp(entry: Any) -> float:
     return 0
 
 
+_AI_TECH_KEYWORDS = {
+    "ai", "artificial intelligence", "machine learning", "deep learning", "neural",
+    "llm", "gpt", "chatgpt", "openai", "anthropic", "google deepmind", "gemini",
+    "claude", "mistral", "meta ai", "nvidia", "chip", "semiconductor", "gpu",
+    "robot", "robotics", "autonomous", "model", "algorithm", "compute", "inference",
+    "training", "dataset", "benchmark", "open source", "startup", "funding", "vc",
+    "software", "cloud", "api", "quantum", "cybersecurity", "hack", "breach",
+    "privacy", "regulation", "tech", "technology", "silicon", "processor",
+}
+
+_NOISE_KEYWORDS = {
+    "deal", "deals", "discount", "sale", "coupon", "prime day", "amazon prime",
+    "shopping", "price drop", "save money", "buy now", "best buy", "black friday",
+    "cyber monday", "promo", "offer", "rebate", "clearance",
+}
+
+
+def _entry_is_relevant(entry: Any) -> bool:
+    text = (str(getattr(entry, "title", "")) + " " + str(getattr(entry, "summary", ""))).lower()
+    if any(kw in text for kw in _NOISE_KEYWORDS):
+        return False
+    return any(kw in text for kw in _AI_TECH_KEYWORDS)
+
+
 def choose_fresh_entry(config: dict[str, Any]) -> Any | None:
     seen = read_seen_links()
     entries = []
@@ -460,7 +484,7 @@ def choose_fresh_entry(config: dict[str, Any]) -> Any | None:
     fresh = []
     for entry in entries:
         link = str(getattr(entry, "link", "")).strip()
-        if link and link not in seen:
+        if link and link not in seen and _entry_is_relevant(entry):
             fresh.append(entry)
 
     if not fresh:
@@ -521,8 +545,8 @@ def local_concept_fallback(concept: str, max_chars: int) -> str:
     )
 
 
-def local_news_fallback(title: str, max_chars: int) -> str:
-    return compact_text(f"tech update: {title} ✨", max_chars)
+def local_news_fallback(title: str, max_chars: int, summary: str = "") -> str:
+    return compact_text(f"{title} ✨", max_chars)
 
 
 def generate_with_gemini(config: dict[str, Any], prompt: str, fallback: str, max_chars: int) -> str:
@@ -654,6 +678,7 @@ def show_popup(
     body: str,
     config: dict[str, Any] | str | int | None = None,
     sound_path: str | None = None,
+    link: str | None = None,
 ) -> None:
     if tk is None or tkfont is None:
         raise RuntimeError(f"tkinter is unavailable: {TK_IMPORT_ERROR}")
@@ -769,13 +794,24 @@ def show_popup(
         if not is_closing["value"]:
             root.after(1000, update_pending_notice)
 
-    for tag, x1, x2, fill, label in (
-        ("close_button", close_x1, close_x2, theme["button"], "close"),
-        ("ok_button", ok_x1, ok_x2, theme["button2"], "okay"),
+    def open_link_and_close(_event: Any | None = None) -> None:
+        if link:
+            try:
+                subprocess.Popen(["open", link])
+            except Exception as exc:
+                log(f"warning: could not open link: {exc}")
+        close_with_animation()
+
+    right_label = "learn more" if link else "okay"
+    right_handler = open_link_and_close if link else close_with_animation
+
+    for tag, x1, x2, fill, label, handler in (
+        ("close_button", close_x1, close_x2, theme["button"], "close", close_with_animation),
+        ("ok_button", ok_x1, ok_x2, theme["button2"], right_label, right_handler),
     ):
         rounded_rect(canvas, x1, button_y1, x2, button_y2, 20, fill=fill, outline=theme["border"], width=3, tags=(tag,))
         canvas.create_text((x1 + x2) // 2, (button_y1 + button_y2) // 2, text=label.upper(), fill="white" if tag == "close_button" else theme["text"], font=button_font, tags=(tag,))
-        canvas.tag_bind(tag, "<Button-1>", close_with_animation)
+        canvas.tag_bind(tag, "<Button-1>", handler)
 
     root.deiconify()
     root.lift()
@@ -798,7 +834,7 @@ def build_news_popup(config: dict[str, Any], entry: Any) -> tuple[str, str, str 
         body = generate_with_gemini(config, prompt, raw_title, max_chars)
     except Exception as exc:
         log(f"warning: Gemini rewrite failed for news; using raw title: {exc}")
-        body = local_news_fallback(raw_title, max_chars)
+        body = local_news_fallback(raw_title, max_chars, summary)
     return title, body, str(getattr(entry, "link", "")).strip() or None
 
 
@@ -845,10 +881,10 @@ def build_popup_for_mode(config: dict[str, Any], mode: str) -> tuple[str, str, s
     return title, body, seen_link, concept_index
 
 
-def show_built_popup(config: dict[str, Any], title: str, body: str) -> int:
+def show_built_popup(config: dict[str, Any], title: str, body: str, link: str | None = None) -> int:
     try:
         max_chars = config_int(config, "popup_body_max_chars", DEFAULT_CONFIG["popup_body_max_chars"])
-        show_popup(compact_text(title, 80), compact_text(body, max_chars), config, sound_path_for_config(config))
+        show_popup(compact_text(title, 80), compact_text(body, max_chars), config, sound_path_for_config(config), link)
     except Exception as exc:
         log(f"error: popup display failed: {exc}")
         return 1
@@ -867,7 +903,7 @@ def run_notifier(mode: str = "normal") -> int:
         while True:
             config = load_config()
             title, body, seen_link, concept_index = build_popup_for_mode(config, mode)
-            result = show_built_popup(config, title, body)
+            result = show_built_popup(config, title, body, seen_link)
             if result:
                 return result
 
